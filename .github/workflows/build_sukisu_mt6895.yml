@@ -12,9 +12,9 @@ on:
           - '5.10'
           - '5.15'
       ANDROID_VERSION:
-        description: "Android版本"
+        description: "Android版本（内核GKI版本，非系统版本）"
         required: true
-        default: 'android13'
+        default: 'android12'
         type: choice
         options:
           - android12
