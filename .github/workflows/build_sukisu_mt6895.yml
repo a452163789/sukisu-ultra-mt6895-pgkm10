@@ -14,11 +14,11 @@ on:
       ANDROID_VERSION:
         description: "Android版本"
         required: true
-        default: 'android14'
+        default: 'android13'
         type: choice
         options:
+          - android12
           - android13
-          - android14
       KPM:
         type: boolean
         description: "是否启用KPM模块支持"
@@ -83,7 +83,9 @@ jobs:
         run: |
           mkdir -p kernel_workspace
           cd kernel_workspace
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} --depth=1
+          # Android 12/13 use format: common-android12-5.10
+          repo init -u https://android.googlesource.com/kernel/manifest \
+            -b common-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} --depth=1
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
           
       - name: Setup SukiSU Ultra
