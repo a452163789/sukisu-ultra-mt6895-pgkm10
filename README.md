@@ -24,7 +24,7 @@
 | 型号 | PGKM10 |
 | 处理器 | MediaTek Dimensity 8100-MAX (MT6895) |
 | 内核版本 | 5.10.x |
-| Android版本 | Android 14 |
+| Android版本 | Android 13/14 (使用Android 13 GKI内核) |
 | 架构 | GKI 2.0 |
 
 ## ✨ 功能特性
@@ -62,7 +62,7 @@
    - 点击 `Run workflow`
    - 配置编译参数：
      - 内核版本: `5.10` (默认)
-     - Android版本: `android14` (默认)
+     - Android版本: `android13` (默认，适用于5.10内核)
      - KPM支持: `true` ✅
      - 自定义名称后缀: `-SukiSU-Ultra-MT6895`
 
