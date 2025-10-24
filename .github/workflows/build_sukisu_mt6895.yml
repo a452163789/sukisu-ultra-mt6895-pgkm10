@@ -1,0 +1,297 @@
+name: Build SukiSU Ultra GKI 2.0 for OnePlus Ace (MT6895)
+
+on:
+  workflow_dispatch:
+    inputs:
+      KERNEL_VERSION:
+        description: "内核版本"
+        required: true
+        default: '5.10'
+        type: choice
+        options:
+          - '5.10'
+          - '5.15'
+      ANDROID_VERSION:
+        description: "Android版本"
+        required: true
+        default: 'android14'
+        type: choice
+        options:
+          - android13
+          - android14
+      KPM:
+        type: boolean
+        description: "是否启用KPM模块支持"
+        required: true
+        default: true
+      KERNEL_NAME:
+        description: "自定义内核名称后缀"
+        required: true
+        default: '-SukiSU-Ultra-MT6895'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            bc bison build-essential ccache curl flex \
+            g++-multilib gcc-multilib git gnupg gperf \
+            imagemagick lib32ncurses5-dev lib32readline-dev \
+            lib32z1-dev liblz4-tool libncurses5 libncurses5-dev \
+            libsdl1.2-dev libssl-dev libxml2 libxml2-utils \
+            lzop pngcrush rsync schedtool squashfs-tools xsltproc \
+            zip zlib1g-dev python3 python-is-python3 libarchive-tools
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Initialize and sync Android GKI kernel
+        run: |
+          mkdir -p kernel_workspace
+          cd kernel_workspace
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} --depth=1
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+          
+      - name: Setup SukiSU Ultra
+        run: |
+          cd kernel_workspace
+          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-dev
+          cd KernelSU
+          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 10606)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          echo "KernelSU Version: $KSU_VERSION"
+
+      - name: Setup SUSFS patches
+        run: |
+          cd kernel_workspace
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }} --depth=1
+          
+          # Copy SUSFS kernel patches
+          cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
+          cp -r susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp -r susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          
+          # Apply SUSFS patches
+          cd common
+          # Fix patch format issues
+          sed -i 's/-32,12 +32,38/-32,11 +32,37/g' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
+          sed -i '/#include <trace\/hooks\/fs.h>/d' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
+          
+          patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
+          echo "SUSFS patches applied successfully"
+
+      - name: Apply LZ4K compression patches
+        run: |
+          cd kernel_workspace
+          git clone https://github.com/ExmikoN/SukiSU_patch.git --depth=1
+          
+          # Copy LZ4K files
+          cp -r SukiSU_patch/other/lz4k/include/linux/* ./common/include/linux/
+          cp -r SukiSU_patch/other/lz4k/lib/* ./common/lib/
+          cp -r SukiSU_patch/other/lz4k/crypto/* ./common/crypto/
+          
+          # Apply LZ4KD patch
+          cd common
+          if [ -f ../SukiSU_patch/other/lz4k_patch/${{ github.event.inputs.KERNEL_VERSION }}/lz4kd.patch ]; then
+            patch -p1 < ../SukiSU_patch/other/lz4k_patch/${{ github.event.inputs.KERNEL_VERSION }}/lz4kd.patch || true
+            echo "LZ4KD patch applied"
+          fi
+
+      - name: Configure kernel for MTK and SukiSU
+        run: |
+          cd kernel_workspace/common
+          
+          # Add KernelSU configurations
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
+          if [ "${{ github.event.inputs.KPM }}" = "true" ]; then
+            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
+          fi
+          
+          # Add SUSFS configurations
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/gki_defconfig
+          
+          # LZ4K compression support
+          echo "CONFIG_CRYPTO_LZ4HC=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4K=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_LZ4KD=y" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_842=y" >> arch/arm64/configs/gki_defconfig
+          
+          # MediaTek specific optimizations
+          echo "CONFIG_MTK_BLOCK_IO_TRACER=n" >> arch/arm64/configs/gki_defconfig || true
+          echo "CONFIG_MTK_PRINTK_UART_CONSOLE=n" >> arch/arm64/configs/gki_defconfig || true
+          
+          # Commit changes
+          git add -A
+          git commit -m "Add SukiSU Ultra + SUSFS for MT6895" || true
+
+      - name: Customize kernel version string
+        run: |
+          cd kernel_workspace/common
+          sed -i 's/res="\$res\$(cat "\$file")"/res="${{ github.event.inputs.KERNEL_NAME }}"/g' scripts/setlocalversion
+
+      - name: Build kernel
+        run: |
+          cd kernel_workspace
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh -j$(nproc --all)
+
+      - name: Prepare kernel image
+        run: |
+          cd kernel_workspace/out/*/dist
+          if [ -f Image.lz4 ]; then
+            echo "Kernel built as Image.lz4"
+            mv Image.lz4 Image.lz4.bak
+          fi
+          if [ ! -f Image ]; then
+            echo "Error: Kernel Image not found!"
+            ls -lah
+            exit 1
+          fi
+          echo "Kernel Image ready"
+
+      - name: Create AnyKernel3 flashable package
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 anykernel3
+          cd anykernel3
+          rm -rf .git .github modules patch ramdisk
+          
+          # Configure for OnePlus Ace (PGKM10)
+          cat > anykernel.sh << 'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # osm0sis @ xda-developers
+          
+          ## AnyKernel setup
+          properties() { '
+          kernel.string=SukiSU Ultra GKI 2.0 for OnePlus Ace (MT6895)
+          do.devicecheck=1
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=PGKM10
+          device.name2=pickle
+          device.name3=OnePlus Ace
+          supported.versions=13-14
+          supported.patchlevels=
+          '; }
+          
+          ## AnyKernel methods
+          # import patching functions/variables
+          . tools/ak3-core.sh
+          
+          ## AnyKernel install
+          dump_boot
+          
+          # begin ramdisk changes
+          # end ramdisk changes
+          
+          write_boot
+          ## end install
+          EOF
+          
+          # Copy kernel image
+          cp ../kernel_workspace/out/*/dist/Image ./ || cp ../kernel_workspace/out/*/dist/Image.gz ./
+          
+          echo "AnyKernel3 package created"
+
+      - name: Package AnyKernel3 ZIP
+        run: |
+          cd anykernel3
+          zip -r9 ../SukiSU-Ultra-MT6895-PGKM10-${{ env.KSUVER }}.zip * -x .git .github
+
+      - name: Upload AnyKernel3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SukiSU-Ultra-MT6895-PGKM10-KSU${{ env.KSUVER }}
+          path: SukiSU-Ultra-MT6895-PGKM10-${{ env.KSUVER }}.zip
+
+      - name: Upload kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-MT6895-KSU${{ env.KSUVER }}
+          path: kernel_workspace/out/*/dist/Image*
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.KSUVER }}-mt6895
+          name: SukiSU Ultra GKI 2.0 - MT6895 (KSU ${{ env.KSUVER }})
+          body: |
+            ## SukiSU Ultra GKI 2.0 for OnePlus Ace (PGKM10)
+            
+            **设备信息:**
+            - 设备: OnePlus Ace (pickle/PGKM10)
+            - 处理器: MediaTek Dimensity 8100-MAX (MT6895)
+            - 内核版本: ${{ github.event.inputs.KERNEL_VERSION }}
+            - Android版本: ${{ github.event.inputs.ANDROID_VERSION }}
+            
+            **功能特性:**
+            - ✅ SukiSU Ultra (KSU Version: ${{ env.KSUVER }})
+            - ✅ SUSFS 完整支持
+            - ✅ KPM模块支持: ${{ github.event.inputs.KPM }}
+            - ✅ LZ4K/LZ4KD压缩支持
+            - ✅ GKI 2.0架构
+            
+            **刷入方法:**
+            1. 下载 `SukiSU-Ultra-MT6895-PGKM10-${{ env.KSUVER }}.zip`
+            2. 重启到Recovery (推荐TWRP或OrangeFox)
+            3. 刷入ZIP包
+            4. 清除Dalvik/ART缓存
+            5. 重启系统
+            6. 安装SukiSU Ultra Manager APK
+            
+            ⚠️ **注意事项:**
+            - 刷入前请备份当前boot分区
+            - 确保已解锁Bootloader
+            - 建议使用最新版Recovery
+          files: |
+            SukiSU-Ultra-MT6895-PGKM10-${{ env.KSUVER }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

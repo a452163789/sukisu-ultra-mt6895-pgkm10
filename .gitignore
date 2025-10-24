@@ -1,0 +1,45 @@
+# Build outputs
+kernel_workspace/
+out/
+dist/
+*.img
+*.zip
+*.gz
+*.lz4
+
+# Kernel build artifacts
+*.o
+*.ko
+*.mod.c
+*.symvers
+*.order
+.tmp_versions/
+modules.builtin
+Module.markers
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+dmesg.txt
+logcat.txt
+
+# Temp
+tmp/
+temp/
+*.bak
+*.tmp
+
+# Boot image
+boot.img
+recovery.img
+vendor_boot.img
