@@ -14,11 +14,11 @@ on:
       ANDROID_VERSION:
         description: "Android版本"
         required: true
-        default: 'android14'
+        default: 'android13'
         type: choice
         options:
+          - android12
           - android13
-          - android14
       KPM:
         type: boolean
         description: "是否启用KPM模块支持"
