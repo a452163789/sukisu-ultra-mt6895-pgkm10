@@ -137,40 +137,43 @@ jobs:
         run: |
           cd kernel_workspace/common
           
-          # Add KernelSU configurations
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
+          # Disable defconfig check to allow custom configs
+          sed -i 's/check_defconfig//' build.config.gki
+          
+          # Create a fragment file with all configs
+          cat > gki_defconfig_fragment << 'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          # CONFIG_KSU_SUSFS_SUS_OVERLAYFS is not set
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          # CONFIG_KSU_SUSFS_SUS_SU is not set
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_CRYPTO_LZ4HC=y
+          CONFIG_CRYPTO_LZ4K=y
+          CONFIG_CRYPTO_LZ4KD=y
+          CONFIG_CRYPTO_842=y
+          EOF
+          
+          # Add KPM if enabled
           if [ "${{ github.event.inputs.KPM }}" = "true" ]; then
-            echo "CONFIG_KPM=y" >> arch/arm64/configs/gki_defconfig
+            echo "CONFIG_KPM=y" >> gki_defconfig_fragment
           fi
           
-          # Add SUSFS configurations
-          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/gki_defconfig
-          
-          # LZ4K compression support
-          echo "CONFIG_CRYPTO_LZ4HC=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_LZ4K=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_LZ4KD=y" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_CRYPTO_842=y" >> arch/arm64/configs/gki_defconfig
-          
-          # MediaTek specific optimizations
-          echo "CONFIG_MTK_BLOCK_IO_TRACER=n" >> arch/arm64/configs/gki_defconfig || true
-          echo "CONFIG_MTK_PRINTK_UART_CONSOLE=n" >> arch/arm64/configs/gki_defconfig || true
+          # Merge fragment into defconfig
+          ./scripts/kconfig/merge_config.sh -m -r arch/arm64/configs/gki_defconfig gki_defconfig_fragment
+          cp .config arch/arm64/configs/gki_defconfig
           
           # Commit changes
           git add -A
